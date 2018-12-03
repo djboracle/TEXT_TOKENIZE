@@ -1,0 +1,578 @@
+
+CREATE OR REPLACE 
+TYPE PIPELINE_VARCHAR2_TYPE AS OBJECT(
+    data VARCHAR2(4000),
+    -- Constructor
+    CONSTRUCTOR FUNCTION PIPELINE_VARCHAR2_TYPE RETURN SELF AS RESULT
+);
+
+CREATE OR REPLACE 
+TYPE PIPELINE_VARCHAR2_SET AS TABLE OF PIPELINE_VARCHAR2_TYPE;
+
+
+CREATE OR REPLACE PACKAGE TEXT_TOKENIZE AS
+
+   TYPE DelimiterSet IS TABLE OF VARCHAR2(100);
+   TYPE TokenSet IS TABLE OF VARCHAR2(4000);
+   
+   DEFAULT_CONSOLIDATION_DELIM CONSTANT VARCHAR2(1) := CHR(182);
+   
+   PROCEDURE addDelimiterToSet(p_delim_set IN OUT DelimiterSet,
+                               p_delimiter VARCHAR2 := NULL);
+
+   -- Returns a concatenated string containing all delimiters in the DelimterSet Array.
+   FUNCTION getDelimiterSetString(p_delim_set DelimiterSet) RETURN VARCHAR2;
+							   
+   FUNCTION trimDelimiter(p_string       VARCHAR2,
+                          p_delim_string VARCHAR2) RETURN VARCHAR2;
+						  
+   FUNCTION trimDelimiter(p_string       CLOB,
+                          p_delim_string VARCHAR2) RETURN CLOB;
+							 
+   FUNCTION consolidateDelimiters(p_string VARCHAR2,
+                                  p_delim_set DelimiterSet,
+								  p_common_delimiter VARCHAR2 := DEFAULT_CONSOLIDATION_DELIM) RETURN VARCHAR2;
+
+   FUNCTION consolidateDelimiters(p_string CLOB,
+                                  p_delim_set DelimiterSet,
+								  p_common_delimiter VARCHAR2 := DEFAULT_CONSOLIDATION_DELIM) RETURN CLOB;							 
+
+   FUNCTION getStringElementMD(p_string    VARCHAR2,
+                               p_element   NUMBER,
+                               p_delim_set DelimiterSet)  RETURN VARCHAR2;
+							   
+   FUNCTION getStringElementMD(p_string    CLOB,
+                               p_element   NUMBER,
+                               p_delim_set DelimiterSet)  RETURN VARCHAR2;							   
+                               
+   FUNCTION getStringElement(p_string    VARCHAR2,
+                             p_element   NUMBER,
+                             p_delimiter VARCHAR2 := ',',
+                             p_level     NUMBER   := 0)   RETURN VARCHAR2;
+							
+   FUNCTION getStringElement(p_string    CLOB,
+                             p_element   NUMBER,
+                             p_delimiter VARCHAR2 := ',',
+                             p_level     NUMBER   := 0)   RETURN VARCHAR2;							
+                             
+                             
+   FUNCTION getElementCount(p_string      VARCHAR2,
+                            p_delimiter   VARCHAR2) RETURN NUMBER;
+							
+   FUNCTION getElementCount(p_string      CLOB,
+                            p_delimiter   VARCHAR2) RETURN NUMBER;
+
+   FUNCTION getElementCountMD(p_string      VARCHAR2,
+                              p_delim_set DelimiterSet) RETURN NUMBER;
+							
+   FUNCTION getElementCountMD(p_string      CLOB,
+                              p_delim_set   DelimiterSet) RETURN NUMBER;	
+
+   FUNCTION getTokenSet(p_string     VARCHAR2,
+                        p_delimiter	 VARCHAR2) RETURN TokenSet;
+						
+   FUNCTION getTokenSet(p_string     CLOB,
+                        p_delimiter  VARCHAR2) RETURN TokenSet;
+
+   FUNCTION getTokenSetMD(p_string     VARCHAR2,
+                          p_delim_set   DelimiterSet) RETURN TokenSet;
+						  
+   FUNCTION getTokenSetMD(p_string     CLOB,
+                          p_delim_set   DelimiterSet) RETURN TokenSet;
+                          
+   FUNCTION pipeLineTokenSet(p_set TokenSet) RETURN PIPELINE_VARCHAR2_SET PIPELINED;
+   
+END;
+/
+
+sho err;
+
+/******************************************************************************************************************************************************************************************/
+/************************************************************************** PACKAGE BODY **************************************************************************************************/
+/******************************************************************************************************************************************************************************************/
+
+CREATE OR REPLACE PACKAGE BODY TEXT_TOKENIZE AS
+
+
+PROCEDURE addDelimiterToSet(p_delim_set IN OUT DelimiterSet,
+                            p_delimiter VARCHAR2 := NULL)
+IS
+BEGIN
+
+  IF p_delimiter IS NOT NULL THEN
+     
+     p_delim_set.EXTEND;
+     p_delim_set(p_delim_set.COUNT) := p_delimiter;
+
+  END IF;
+
+END;
+
+/*==========================================================================================================================================*/
+
+FUNCTION getDelimiterSetString(p_delim_set DelimiterSet) RETURN VARCHAR2
+IS
+
+   v_delim_set VARCHAR2(4000) := NULL;
+
+BEGIN
+
+   FOR x IN 1 .. p_delim_set.COUNT LOOP
+   
+      v_delim_set := v_delim_set||p_delim_set(x);
+   
+   END LOOP;
+
+   RETURN v_delim_set;
+
+END;
+
+/*==========================================================================================================================================*/
+							   
+FUNCTION trimDelimiter(p_string       VARCHAR2,
+                       p_delim_string VARCHAR2) RETURN VARCHAR2
+IS
+
+   v_return VARCHAR2(32000) := p_string;
+
+BEGIN
+
+   IF (INSTR(p_delim_string,SUBSTR(v_return,length(v_return),1)) > 0) THEN
+   
+      v_return := SUBSTR(v_return,1,length(v_return)-1);
+   
+   END IF;
+
+   RETURN v_return;
+   
+END;
+
+/*========================================================================================================================================*/
+						  
+FUNCTION trimDelimiter(p_string       CLOB,
+                       p_delim_string VARCHAR2) RETURN CLOB
+IS
+
+   v_return VARCHAR2(32000) := p_string;
+
+BEGIN
+
+   IF (INSTR(p_delim_string,SUBSTR(v_return,length(v_return),1)) > 0) THEN
+   
+      v_return := SUBSTR(v_return,1,length(v_return)-1);
+   
+   END IF;
+
+   RETURN v_return;
+   
+END;					   
+
+/*==========================================================================================================================================*/
+
+FUNCTION consolidateDelimiters(p_string VARCHAR2,
+                               p_delim_set DelimiterSet,
+							   p_common_delimiter VARCHAR2 := DEFAULT_CONSOLIDATION_DELIM) RETURN VARCHAR2
+IS
+
+  v_string VARCHAR2(32000) := p_string;
+
+BEGIN
+
+   FOR x IN 1 .. p_delim_set.COUNT LOOP
+   
+      v_string := replace(v_string,p_delim_set(x),p_common_delimiter);
+	    
+   END LOOP;
+
+   RETURN v_string;
+
+END;
+
+/*==========================================================================================================================================*/
+
+FUNCTION consolidateDelimiters(p_string CLOB,
+                               p_delim_set DelimiterSet,
+							   p_common_delimiter VARCHAR2 := DEFAULT_CONSOLIDATION_DELIM) RETURN CLOB
+IS
+
+  v_string CLOB := p_string;
+  v_delims_string VARCHAR2(2000) := NULL;
+
+BEGIN
+
+   FOR x IN 1 .. p_delim_set.COUNT LOOP
+   
+      v_string := replace(v_string,p_delim_set(x),p_common_delimiter);
+   
+   END LOOP;
+
+   RETURN v_string;
+
+END;
+
+/*==========================================================================================================================================*/
+
+FUNCTION getStringElement(p_string    VARCHAR2,
+                          p_element   NUMBER,
+                          p_delimiter VARCHAR2 := ',',
+                          p_level     NUMBER   := 0)   RETURN VARCHAR2
+
+IS
+
+   v_string   VARCHAR2(32000) := NULL;
+   v_element  VARCHAR2(16000) := NULL;
+   v_next     VARCHAR2(16000) := NULL;
+   v_level    NUMBER(4)      := 0;
+
+BEGIN
+
+   v_level := p_level + 1;
+
+   v_element  := substr(p_string||p_delimiter,1,instr(p_string||p_delimiter,p_delimiter)-1);
+
+   -- need to look ahead to make sure we handle the null elements.
+
+   v_next     := substr(p_string||p_delimiter,instr(p_string||p_delimiter,p_delimiter),length(p_delimiter));
+
+   IF ((v_level >= p_element) OR (v_element IS NULL AND v_next != p_delimiter)) THEN
+
+      RETURN v_element;
+   ELSE
+
+      v_string := substr(p_string||p_delimiter,instr(p_string||p_delimiter,p_delimiter)+length(p_delimiter),length(p_string));
+      RETURN getStringElement(v_string,p_element,p_delimiter,v_level);
+   END IF;
+
+END;
+
+/*==========================================================================================================================================*/
+
+FUNCTION getStringElement(p_string    CLOB,
+                          p_element   NUMBER,
+                          p_delimiter VARCHAR2 := ',',
+                          p_level     NUMBER   := 0)   RETURN VARCHAR2
+
+IS
+
+   v_string   CLOB := NULL;
+   
+   v_string_cast VARCHAR2(32000) := NULL;
+   
+   v_element  VARCHAR2(16000) := NULL;
+   v_next     VARCHAR2(16000) := NULL;
+   v_level    NUMBER(4)      := 0;
+
+BEGIN
+
+   v_level := p_level + 1;
+
+   v_element  := substr(p_string||p_delimiter,1,instr(p_string||p_delimiter,p_delimiter)-1);
+
+   -- need to look ahead to make sure we handle the null elements.
+
+   v_next     := substr(p_string||p_delimiter,instr(p_string||p_delimiter,p_delimiter),length(p_delimiter));
+
+   IF ((v_level >= p_element) OR (v_element IS NULL AND v_next != p_delimiter)) THEN
+
+      RETURN v_element;
+   ELSE
+
+      v_string := substr(p_string||p_delimiter,instr(p_string||p_delimiter,p_delimiter)+length(p_delimiter),length(p_string));
+	  
+	  IF length(v_string) < 32000 THEN
+	  
+	     RETURN getStringElement(CAST(v_string AS VARCHAR2),p_element,p_delimiter,v_level);
+	  
+	  ELSE
+	  
+         RETURN getStringElement(v_string,p_element,p_delimiter,v_level);
+		 
+	   END IF;
+	   
+   END IF;
+
+END;
+
+/*==================================================================================================================================================*/
+
+FUNCTION getStringElementMD(p_string    VARCHAR2,
+                            p_element   NUMBER,
+                            p_delim_set DelimiterSet)   RETURN VARCHAR2
+
+IS
+
+   v_string        VARCHAR2(32000) := NULL;
+   v_delim_set     VARCHAR2(2000)  := NULL;
+   v_delim         VARCHAR2(3)    := DEFAULT_CONSOLIDATION_DELIM;
+   
+   v_return        VARCHAR2(32000) := NULL;
+   
+BEGIN
+   
+   v_string    := consolidateDelimiters(p_string,p_delim_set,v_delim);
+   
+   v_delim_set := getDelimiterSetString(p_delim_set);
+   
+   v_return    := getStringElement(v_string,p_element,v_delim);
+   
+   IF (INSTR(v_delim_set,SUBSTR(v_return,length(v_return),1)) > 0) THEN
+   
+      v_return := SUBSTR(v_return,1,length(v_return)-1);
+   
+   END IF;
+
+   RETURN v_return;
+
+END;
+
+
+/*==================================================================================================================================================*/
+
+FUNCTION getStringElementMD(p_string    CLOB,
+                            p_element   NUMBER,
+                            p_delim_set DelimiterSet)   RETURN VARCHAR2
+
+IS
+
+   v_string        CLOB := NULL;
+   v_delim_set     VARCHAR2(2000)  := NULL;
+   v_delim         VARCHAR2(3)    := DEFAULT_CONSOLIDATION_DELIM;
+   
+   v_return        VARCHAR2(32000) := NULL;
+   
+BEGIN
+   
+   v_string    := consolidateDelimiters(p_string,p_delim_set,v_delim);
+   
+   v_delim_set := getDelimiterSetString(p_delim_set);
+   
+   v_return    := getStringElement(v_string,p_element,v_delim);
+   
+   IF (INSTR(v_delim_set,SUBSTR(v_return,length(v_return),1)) > 0) THEN
+   
+      v_return := SUBSTR(v_return,1,length(v_return)-1);
+   
+   END IF;
+
+   RETURN v_return;
+
+END;
+
+
+/*==================================================================================================================================================*/
+
+FUNCTION getElementCount(p_string      VARCHAR2,
+                         p_delimiter   VARCHAR2) RETURN NUMBER
+IS
+
+  v_cnt NUMBER(6) := 1;
+
+BEGIN
+
+
+  WHILE
+      INSTR(p_string,p_delimiter,1,v_cnt) > 0 LOOP
+      v_cnt := v_cnt + 1;
+  END LOOP;
+
+  RETURN v_cnt;
+
+END;
+
+/*==================================================================================================================================================*/
+
+FUNCTION getElementCount(p_string      CLOB,
+                         p_delimiter   VARCHAR2) RETURN NUMBER
+IS
+
+  v_cnt NUMBER(6) := 1;
+
+BEGIN
+
+
+  WHILE
+      INSTR(p_string,p_delimiter,1,v_cnt) > 0 LOOP
+      v_cnt := v_cnt + 1;
+  END LOOP;
+
+  RETURN v_cnt;
+
+END;
+
+/*==================================================================================================================================================*/
+
+FUNCTION getElementCountMD(p_string      VARCHAR2,
+                           p_delim_set DelimiterSet) RETURN NUMBER
+IS
+
+  v_cnt     NUMBER(6) := 1;
+  v_delim   VARCHAR2(3)    := DEFAULT_CONSOLIDATION_DELIM;
+  v_string  VARCHAR2(32000) := p_string;
+
+BEGIN
+
+  v_string := consolidateDelimiters(p_string,p_delim_set,v_delim);
+
+  v_cnt := getElementCount(v_string,v_delim);
+
+  RETURN v_cnt;
+
+END;
+
+/*==================================================================================================================================================*/
+
+FUNCTION getElementCountMD(p_string      CLOB,
+                           p_delim_set DelimiterSet) RETURN NUMBER
+IS
+
+  v_cnt     NUMBER(6) := 1;
+  v_delim   VARCHAR2(3)    := DEFAULT_CONSOLIDATION_DELIM;
+  v_string  CLOB := p_string;
+
+BEGIN
+
+  v_string := consolidateDelimiters(p_string,p_delim_set,v_delim);
+
+  v_cnt := getElementCount(v_string,v_delim);
+
+  RETURN v_cnt;
+
+END;
+
+/*=================================================================================================================================================*/
+
+FUNCTION getTokenSet(p_string     VARCHAR2,
+                     p_delimiter  VARCHAR2) RETURN TokenSet
+IS
+
+  v_TokenSet TokenSet := TokenSet();
+ 
+  v_cnt NUMBER(12) := 0;
+
+BEGIN
+
+  v_cnt := getElementCount(p_string,p_delimiter);
+  
+  FOR x IN 1 .. v_cnt LOOP
+  
+     v_TokenSet.EXTEND();
+     v_TokenSet(v_TokenSet.COUNT) := getStringElement(p_string,x,p_delimiter);
+  
+  END LOOP;
+  
+  RETURN v_TokenSet;
+  
+END;
+
+/*=================================================================================================================================================*/
+
+FUNCTION getTokenSet(p_string     CLOB,
+                     p_delimiter  VARCHAR2) RETURN TokenSet
+IS
+
+  v_TokenSet TokenSet := TokenSet();
+ 
+  v_cnt NUMBER(12) := 0;
+
+BEGIN
+
+  v_cnt := getElementCount(p_string,p_delimiter);
+  
+  FOR x IN 1 .. v_cnt LOOP
+  
+     v_TokenSet.EXTEND();
+     v_TokenSet(v_TokenSet.COUNT) := getStringElement(p_string,x,p_delimiter);
+  
+  END LOOP;
+  
+  RETURN v_TokenSet;
+  
+END;
+
+
+/*=================================================================================================================================================*/
+
+FUNCTION getTokenSetMD(p_string     VARCHAR2,
+                       p_delim_set   DelimiterSet) RETURN TokenSet
+IS
+
+  v_TokenSet TokenSet := TokenSet();
+ 
+  v_cnt NUMBER(12) := 0;
+
+BEGIN
+
+  v_cnt := getElementCountMD(p_string,p_delim_set);
+  
+  FOR x IN 1 .. v_cnt LOOP
+  
+     v_TokenSet.EXTEND();
+     v_TokenSet(v_TokenSet.COUNT) := getStringElementMD(p_string,x,p_delim_set);
+  
+  END LOOP;
+  
+  RETURN v_TokenSet;
+  
+END;
+
+/*=================================================================================================================================================*/
+
+FUNCTION getTokenSetMD(p_string     CLOB,
+                       p_delim_set   DelimiterSet) RETURN TokenSet
+IS
+
+  v_TokenSet TokenSet := TokenSet();
+ 
+  v_cnt NUMBER(12) := 0;
+
+BEGIN
+
+  v_cnt := getElementCountMD(p_string,p_delim_set);
+  
+  FOR x IN 1 .. v_cnt LOOP
+  
+     v_TokenSet.EXTEND();
+     v_TokenSet(v_TokenSet.COUNT) := getStringElementMD(p_string,x,p_delim_set);
+  
+  END LOOP;
+  
+  RETURN v_TokenSet;
+  
+END;
+
+
+/*================================================================================================================================================*/
+
+FUNCTION pipeLineTokenSet(p_set TokenSet) RETURN PIPELINE_VARCHAR2_SET PIPELINED
+IS
+
+  v_varchar_set PIPELINE_VARCHAR2_SET := PIPELINE_VARCHAR2_SET(); 
+
+BEGIN
+
+  FOR x IN 1 .. p_set.COUNT LOOP
+  
+     v_varchar_set.EXTEND();
+     v_varchar_set(v_varchar_set.COUNT) := PIPELINE_VARCHAR2_TYPE(p_set(x));
+  
+  END LOOP;
+
+
+  FOR i IN 1 .. v_varchar_set.COUNT LOOP
+
+    PIPE ROW(v_varchar_set(i));
+
+  END LOOP;
+
+  RETURN;
+
+END;
+
+/*==================*/
+/* END PACKAGE BODY */
+/*==================*/
+
+END;
+/
+
+sho err;
