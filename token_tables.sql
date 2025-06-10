@@ -1,0 +1,21 @@
+CREATE TABLE TEXT_TOKENS(
+id        NUMBER(12) PRIMARY KEY,
+token     VARCHAR2(200) NOT NULL,
+frequency NUMBER(12)
+)
+/
+
+CREATE TABLE TEXT_DOCUMENTS(
+id           NUMBER(12) PRIMARY KEY,
+description  VARCHAR2(200),
+text         CLOB
+)
+/
+
+
+CREATE TABLE TEXT_TOKEN_MAP(
+ tkn_id    NUMBER(12) NOT NULL,
+ doc_id    NUMBER(12) NOT NULL,
+ frequency NUMBER(12)
+ )
+ /
